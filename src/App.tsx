@@ -12,6 +12,11 @@ import ConnectButton from './components/ConnectButton';
 
 import { Web3Provider } from '@ethersproject/providers';
 import { getChainData } from './helpers/utilities';
+import BookLibrary from './constants/abis/BookLibrary.json';
+
+import { BOOK_LIBRARY_ADDRESS } from './constants';
+import { getContract } from './helpers/ethers'
+import Button from './components/Button';
 
 const SLayout = styled.div`
   position: relative;
@@ -25,6 +30,50 @@ const SContent = styled(Wrapper)`
   height: 100%;
   padding: 0 16px;
 `;
+
+const BooksWrapper = styled.div`
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  p {
+    margin-right: 5px;
+  }
+  .elections {
+    color: green;
+    &.ended {
+      color: red;
+    }
+  }
+  div {
+    margin-bottom: 10px;
+    display: flex;
+  }
+  margin-bottom: 20px;
+  .title {
+    font-weight: 700;
+  }
+`
+
+const TransactionInfoWrapper = styled(Wrapper)`
+  width: 100%;
+  height: auto;
+  color: red;
+`
+
+const AddBookForm = styled.div`
+  display: flex;
+  flex-direction: column;
+  div {
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: flex-end;
+  }
+`
+
+const SomethingWentWrong = styled.div`
+  color: red;
+`
 
 const SContainer = styled.div`
   height: 100%;
@@ -57,8 +106,13 @@ interface IAppState {
   chainId: number;
   pendingRequest: boolean;
   result: any | null;
-  electionContract: any | null;
+  bookLibraryContract: any | null;
   info: any | null;
+  bookTitle: string | null;
+  bookCopies: string |null;
+  error: string | null;
+  allBooks: Array<[]> | null;
+  transactionHash: string | null;
 }
 
 const INITIAL_STATE: IAppState = {
@@ -70,8 +124,13 @@ const INITIAL_STATE: IAppState = {
   chainId: 1,
   pendingRequest: false,
   result: null,
-  electionContract: null,
-  info: null
+  bookLibraryContract: null,
+  info: null,
+  bookTitle: null,
+  bookCopies: null,
+  error: null,
+  allBooks: null,
+  transactionHash: null
 };
 
 class App extends React.Component<any, any> {
@@ -108,14 +167,133 @@ class App extends React.Component<any, any> {
 
     await this.subscribeToProviderEvents(provider);
 
+    const bookLibraryContract = getContract(BOOK_LIBRARY_ADDRESS, BookLibrary.abi, library, address);
+
     await this.setState({
       provider,
       library,
       chainId: network.chainId,
       address,
-      connected: true
+      connected: true,
+      bookLibraryContract
     });
+
+    await this.getAvailableBooks();
   };
+
+  public async getAvailableBooks() {
+    const { bookLibraryContract } = this.state;
+    const numberOfBooks = (await bookLibraryContract.getNumberOfBooks()).toNumber();
+    const allBooks = [];
+    for (let index = 0; index < numberOfBooks; index++) {
+      const bookKey = await bookLibraryContract.bookKey(index);
+      const book = await bookLibraryContract.books(bookKey);
+      const isBorrowed = await this.isBookBorrowed(this.state.address, bookKey);
+          // Keep the key of the book, so we don't have to call every time the contract to get the key.
+          const tempBook = {
+            copies: book.copies.toString(),
+            title: book.title,
+            key: bookKey,
+            isBorrowed
+          }
+          allBooks.push(tempBook);
+      
+    }
+    await this.setState({allBooks})
+  }
+
+  public async handleChange(event: any) {
+    
+    switch (event.target.name) {
+      case 'book-title':
+        await this.setState({bookTitle: event.target.value})
+        break;
+      case 'book-copies':
+        this.setState({bookCopies: event.target.value})
+        break;
+      default:
+        break;
+    }
+
+  }
+
+  public async addBook() {
+    const { bookLibraryContract } = this.state;
+		try {
+      await this.setState({ fetching: true });
+      const transaction = await bookLibraryContract.addBook(this.state.bookTitle, this.state.bookCopies);
+  
+      await this.setState({ transactionHash: transaction.hash });
+      
+      const transactionReceipt = await transaction.wait();
+      if (transactionReceipt.status !== 1) {
+          await this.setState({ transactionHash: null, fetching: false, error: transaction.error });
+          return;
+      }
+
+      await this.setState({ transactionHash: null, bookTitle: null, bookCopies: null, fetching: false, error: null });
+      await this.getAvailableBooks();
+
+    } catch (error) {
+      await this.setState({ transactionHash: null, bookTitle: null, bookCopies: null, fetching: false, error: error.message });
+    }
+	
+  }
+
+  public async borrowBook(key: any) {
+    const { bookLibraryContract } = this.state;
+
+    try {
+      await this.setState({ fetching: true });
+      const transaction = await bookLibraryContract.borrowBook(key);
+  
+      await this.setState({ transactionHash: transaction.hash });
+      
+      const transactionReceipt = await transaction.wait();
+      if (transactionReceipt.status !== 1) {
+          await this.setState({ transactionHash: null, fetching: false, error: transaction.error });
+          return;
+      }
+
+      await this.setState({ transactionHash: null, bookTitle: null, bookCopies: null, fetching: false, error: null });
+      await this.getAvailableBooks();
+
+    } catch (error) {
+      await this.setState({ transactionHash: null, bookTitle: null, bookCopies: null, fetching: false, error: error.message });
+    }
+
+  }
+
+  public async returnBook(key: any) {
+    const { bookLibraryContract } = this.state;
+
+    try {
+      await this.setState({ fetching: true });
+      const transaction = await bookLibraryContract.returnBook(key);
+  
+      await this.setState({ transactionHash: transaction.hash });
+      
+      const transactionReceipt = await transaction.wait();
+      if (transactionReceipt.status !== 1) {
+          await this.setState({ transactionHash: null, fetching: false, error: transaction.error });
+          return;
+      }
+
+      await this.setState({ transactionHash: null, bookTitle: null, bookCopies: null, fetching: false, error: null });
+      await this.getAvailableBooks();
+
+    } catch (error) {
+      await this.setState({ transactionHash: null, bookTitle: null, bookCopies: null, fetching: false, error: error.message });
+    }
+
+  }
+
+  public async isBookBorrowed(address: any, bookKey: any) {
+    const { bookLibraryContract } = this.state;
+
+    return await bookLibraryContract.borrowedBook(address, bookKey);
+   
+  }
 
   public subscribeToProviderEvents = async (provider: any) => {
     if (!provider.on) {
@@ -175,11 +353,65 @@ class App extends React.Component<any, any> {
               <Column center>
                 <SContainer>
                   <Loader />
+                  <TransactionInfoWrapper>
+                  {this.state.transactionHash && <div>
+                      {this.state.transactionHash}
+                      <div>
+                        <a href={`https://kovan.etherscan.io/tx/${this.state.transactionHash}`} >Link to Etherscan</a>
+                      </div>
+                    </div>}
+                  </TransactionInfoWrapper>
                 </SContainer>
               </Column>
             ) : (
                 <SLanding center>
-                  <ConnectButton onClick={this.onConnect} />
+                  {!this.state.connected && <ConnectButton onClick={this.onConnect} />}
+                  {this.state.connected && <BooksWrapper>
+                    
+                    {this.state.allBooks?.length && this.state.allBooks?.map((book:any, index) => (
+                      <div key={index}>
+                        <p>Book Title:</p>
+                        <p className="title">
+                          {book.title}
+                        </p>
+                        <p>Available Copies:</p>
+                        <p className="copies">
+                          {book.copies}
+                        </p>
+                        { !book.isBorrowed && <Button disabled={book.copies === '0'} onClick={() => this.borrowBook(book.key)} >Borrow</Button>}
+                        { book.isBorrowed && <Button color="red" onClick={() => this.returnBook(book.key)}>Return</Button>}
+                      </div>
+                   
+                    ))}
+                    {/* <div>
+                      The current leader is: {this.state.currentLeader}
+                    </div>
+                    <div>
+                      Biden Seats: {this.state.bidenSeats}
+                    </div>
+                    <div>
+                      Trump Seats: {this.state.trumpSeats}
+                    </div> */}
+                  </BooksWrapper>}
+                  <AddBookForm>
+                    <div>
+                      <label>
+                        Book Title:
+                      </label>
+                      <input type="text" id='book-title' name="book-title" onChange={() => {this.handleChange(event)}} /> 
+                    </div>
+                    <div>
+                      <label>
+                          Book Copies:
+                      </label>
+                      <input type="number" id='book-copies' name="book-copies" onChange={() => {this.handleChange(event)}}/>
+                    </div>     
+                    <Button onClick={() => this.addBook()} >Add Book</Button>
+                  </AddBookForm>
+                  {this.state.error && <SomethingWentWrong>
+                    {this.state.error}
+                  </SomethingWentWrong>}
+
                 </SLanding>
               )}
           </SContent>
