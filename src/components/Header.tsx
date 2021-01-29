@@ -4,6 +4,7 @@ import * as PropTypes from 'prop-types'
 import Blockie from './Blockie'
 import { ellipseAddress, getChainData } from '../helpers/utilities';
 import { transitions } from '../styles'
+import { utils } from 'ethers';
 
 const SHeader = styled.div`
   margin-top: -1px;
@@ -76,10 +77,12 @@ interface IHeaderProps {
   connected: boolean
   address: string
   chainId: number
+  balance: any
 }
 
 const Header = (props: IHeaderProps) => {
   const { connected, address, chainId, killSession } = props
+  const balance = props.balance ? utils.formatEther(props.balance.toString()) : 0;
   const chainData = chainId ? getChainData(chainId) : null
   return (
     <SHeader {...props}>
@@ -87,6 +90,7 @@ const Header = (props: IHeaderProps) => {
         <SActiveChain>
           <p>{`Connected to`}</p>
           <p>{chainData.name}</p>
+          <p>{'LIB TOKEN BALANCE: '} {balance}</p>
         </SActiveChain>
       ) : 'Not Connected'}
       {address && (
@@ -95,7 +99,7 @@ const Header = (props: IHeaderProps) => {
           <SAddress connected={connected}>{ellipseAddress(address)}</SAddress>
           <SDisconnect connected={connected} onClick={killSession}>
             {'Disconnect'}
-          </SDisconnect>
+          </SDisconnect >
         </SActiveAccount>
       )}
     </SHeader>

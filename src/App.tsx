@@ -13,10 +13,13 @@ import ConnectButton from './components/ConnectButton';
 import { Web3Provider } from '@ethersproject/providers';
 import { getChainData } from './helpers/utilities';
 import BookLibrary from './constants/abis/BookLibrary.json';
+import LIBWrapper from './constants/abis/LIBWrapper.json';
+import LIB from './constants/abis/LIB.json';
 
-import { BOOK_LIBRARY_ADDRESS } from './constants';
+import { BOOK_LIBRARY_ADDRESS, WRAPPER_CONTRACT_ADDRESS } from './constants';
 import { getContract } from './helpers/ethers'
 import Button from './components/Button';
+import { utils } from 'ethers';
 
 const SLayout = styled.div`
   position: relative;
@@ -71,6 +74,16 @@ const AddBookForm = styled.div`
   }
 `
 
+const WrapTokenForm = styled.div`
+  display: flex;
+  flex-direction: column;
+  div {
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: flex-end;
+  }
+`
+
 const SomethingWentWrong = styled.div`
   color: red;
 `
@@ -107,12 +120,16 @@ interface IAppState {
   pendingRequest: boolean;
   result: any | null;
   bookLibraryContract: any | null;
+  wrapperContract: any | null;
+  tokenContract: any | null;
   info: any | null;
   bookTitle: string | null;
   bookCopies: string |null;
   error: string | null;
   allBooks: Array<[]> | null;
   transactionHash: string | null;
+  token: any;
+  balance: any;
 }
 
 const INITIAL_STATE: IAppState = {
@@ -125,12 +142,16 @@ const INITIAL_STATE: IAppState = {
   pendingRequest: false,
   result: null,
   bookLibraryContract: null,
+  wrapperContract: null,
+  tokenContract: null,
   info: null,
   bookTitle: null,
   bookCopies: null,
   error: null,
   allBooks: null,
-  transactionHash: null
+  transactionHash: null,
+  token: null,
+  balance: null
 };
 
 class App extends React.Component<any, any> {
@@ -168,6 +189,14 @@ class App extends React.Component<any, any> {
     await this.subscribeToProviderEvents(provider);
 
     const bookLibraryContract = getContract(BOOK_LIBRARY_ADDRESS, BookLibrary.abi, library, address);
+    const wrapperContract = getContract(WRAPPER_CONTRACT_ADDRESS, LIBWrapper.abi, library, address);
+    const libAddress = await wrapperContract.LIBToken();
+    console.log('LIB ADDRESS',libAddress);
+    const wrapperAddress = await bookLibraryContract.wrapperContract();
+    console.log('WRAPPER ADDRESS',wrapperAddress);
+
+    const tokenContract = getContract(libAddress, LIB.abi, library, address);
+
 
     await this.setState({
       provider,
@@ -175,11 +204,52 @@ class App extends React.Component<any, any> {
       chainId: network.chainId,
       address,
       connected: true,
-      bookLibraryContract
+      bookLibraryContract,
+      wrapperContract,
+      tokenContract
     });
 
     await this.getAvailableBooks();
+    await this.getLibBalance();
   };
+
+  public async getLibBalance() {
+    const { tokenContract, bookLibraryContract } = this.state;
+    const balance = await tokenContract.balanceOf(this.state.address);
+    const contractBalance = await bookLibraryContract.getAmount();
+    console.log('HERE COntract', bookLibraryContract)
+    console.log('HERE BOOKLIBRARY ETH BALANCE:s', contractBalance.toString());
+    await this.setState({ balance });
+
+    const libraryBalance = await tokenContract.balanceOf(BOOK_LIBRARY_ADDRESS);
+    console.log('TOKEN LIBRARY BALANCE in TOKEN Contract:',libraryBalance.toString());
+
+  }
+
+  public async wrapLIBToken() {
+    const { tokenContract, wrapperContract, token } = this.state;
+    
+    const wrapValue = utils.parseEther(token);
+
+    console.log(wrapValue.toString())
+
+    const wrapTx = await wrapperContract.wrap({value: wrapValue})
+    await wrapTx.wait();
+
+	  const balance = await tokenContract.balanceOf(this.state.address)
+    console.log("Balance after wrapping:", balance.toString())
+    await this.getLibBalance();
+    
+  }
+
+  public async unwrapToken() {
+    try {
+      const { bookLibraryContract } = this.state;
+      await bookLibraryContract.unwrapToken();
+    } catch (e) {
+      console.log(e)
+    }
+  }
 
   public async getAvailableBooks() {
     const { bookLibraryContract } = this.state;
@@ -211,6 +281,9 @@ class App extends React.Component<any, any> {
       case 'book-copies':
         this.setState({bookCopies: event.target.value})
         break;
+      case 'lib-token':
+        this.setState({token: event.target.value})
+        break;
       default:
         break;
     }
@@ -241,10 +314,17 @@ class App extends React.Component<any, any> {
   }
 
   public async borrowBook(key: any) {
-    const { bookLibraryContract } = this.state;
+    const { bookLibraryContract, tokenContract } = this.state;
+    const wrapValue = utils.parseEther('1');
 
     try {
       await this.setState({ fetching: true });
+
+      // Approve Transaction
+      const approveTx = await tokenContract.approve(BOOK_LIBRARY_ADDRESS, wrapValue);
+      await approveTx.wait()
+      
+      // Borrow Transaction
       const transaction = await bookLibraryContract.borrowBook(key);
   
       await this.setState({ transactionHash: transaction.hash });
@@ -257,6 +337,7 @@ class App extends React.Component<any, any> {
 
       await this.setState({ transactionHash: null, bookTitle: null, bookCopies: null, fetching: false, error: null });
       await this.getAvailableBooks();
+      await this.getLibBalance();
 
     } catch (error) {
       await this.setState({ transactionHash: null, bookTitle: null, bookCopies: null, fetching: false, error: error.message });
@@ -347,6 +428,7 @@ class App extends React.Component<any, any> {
             address={address}
             chainId={chainId}
             killSession={this.resetApp}
+            balance={this.state.balance}
           />
           <SContent>
             {fetching ? (
@@ -408,10 +490,19 @@ class App extends React.Component<any, any> {
                     </div>     
                     <Button onClick={() => this.addBook()} >Add Book</Button>
                   </AddBookForm>
+                  <WrapTokenForm>
+                  <div>
+                      <label>
+                        Wrap ETH TO LIB:
+                      </label>
+                      <input type="text" id='lib-token' name="lib-token" onChange={() => {this.handleChange(event)}} /> 
+                    </div>
+                    <Button onClick={() => this.wrapLIBToken()} >Wrap</Button>
+                  </WrapTokenForm>
                   {this.state.error && <SomethingWentWrong>
                     {this.state.error}
                   </SomethingWentWrong>}
-
+                  <Button onClick={() => this.unwrapToken()} >Unwrap Token</Button>
                 </SLanding>
               )}
           </SContent>
