@@ -77,6 +77,7 @@ const AddBookForm = styled.div`
 const WrapTokenForm = styled.div`
   display: flex;
   flex-direction: column;
+  margin: 20px;
   div {
     margin-bottom: 10px;
     display: flex;
@@ -130,6 +131,9 @@ interface IAppState {
   transactionHash: string | null;
   token: any;
   balance: any;
+  ownerAddress: string | null;
+  contractETHBalance: any | null;
+  contractTOKENBalance: any | null;
 }
 
 const INITIAL_STATE: IAppState = {
@@ -151,7 +155,10 @@ const INITIAL_STATE: IAppState = {
   allBooks: null,
   transactionHash: null,
   token: null,
-  balance: null
+  balance: null,
+  ownerAddress: null,
+  contractETHBalance: null,
+  contractTOKENBalance: null
 };
 
 class App extends React.Component<any, any> {
@@ -189,14 +196,12 @@ class App extends React.Component<any, any> {
     await this.subscribeToProviderEvents(provider);
 
     const bookLibraryContract = getContract(BOOK_LIBRARY_ADDRESS, BookLibrary.abi, library, address);
+    const ownerAddress = await bookLibraryContract.owner();
+
     const wrapperContract = getContract(WRAPPER_CONTRACT_ADDRESS, LIBWrapper.abi, library, address);
     const libAddress = await wrapperContract.LIBToken();
-    console.log('LIB ADDRESS',libAddress);
-    const wrapperAddress = await bookLibraryContract.wrapperContract();
-    console.log('WRAPPER ADDRESS',wrapperAddress);
 
     const tokenContract = getContract(libAddress, LIB.abi, library, address);
-
 
     await this.setState({
       provider,
@@ -206,49 +211,52 @@ class App extends React.Component<any, any> {
       connected: true,
       bookLibraryContract,
       wrapperContract,
-      tokenContract
+      tokenContract,
+      ownerAddress
     });
 
     await this.getAvailableBooks();
     await this.getLibBalance();
+
   };
 
   public async getLibBalance() {
     const { tokenContract, bookLibraryContract } = this.state;
     const balance = await tokenContract.balanceOf(this.state.address);
-    const contractBalance = await bookLibraryContract.getAmount();
-    console.log('HERE COntract', bookLibraryContract)
-    console.log('HERE BOOKLIBRARY ETH BALANCE:s', contractBalance.toString());
-    await this.setState({ balance });
 
-    const libraryBalance = await tokenContract.balanceOf(BOOK_LIBRARY_ADDRESS);
-    console.log('TOKEN LIBRARY BALANCE in TOKEN Contract:',libraryBalance.toString());
+    const contractETHBalance = (await bookLibraryContract.getAmount()).toString();
+
+    const contractTOKENBalance = (await tokenContract.balanceOf(BOOK_LIBRARY_ADDRESS)).toString();
+
+    await this.setState({ balance, contractETHBalance, contractTOKENBalance });
 
   }
 
   public async wrapLIBToken() {
-    const { tokenContract, wrapperContract, token } = this.state;
+    const { wrapperContract, token } = this.state;
     
     const wrapValue = utils.parseEther(token);
-
-    console.log(wrapValue.toString())
-
     const wrapTx = await wrapperContract.wrap({value: wrapValue})
     await wrapTx.wait();
 
-	  const balance = await tokenContract.balanceOf(this.state.address)
-    console.log("Balance after wrapping:", balance.toString())
     await this.getLibBalance();
     
   }
 
   public async unwrapToken() {
-    try {
+    
       const { bookLibraryContract } = this.state;
       await bookLibraryContract.unwrapToken();
-    } catch (e) {
-      console.log(e)
-    }
+      await this.getLibBalance();
+    
+  }
+
+  public async withdrawETH() {
+   
+      const { bookLibraryContract } = this.state;
+      await bookLibraryContract.withdrawETH();
+      await this.getLibBalance();
+  
   }
 
   public async getAvailableBooks() {
@@ -362,6 +370,7 @@ class App extends React.Component<any, any> {
 
       await this.setState({ transactionHash: null, bookTitle: null, bookCopies: null, fetching: false, error: null });
       await this.getAvailableBooks();
+      await this.getLibBalance();
 
     } catch (error) {
       await this.setState({ transactionHash: null, bookTitle: null, bookCopies: null, fetching: false, error: error.message });
@@ -429,6 +438,9 @@ class App extends React.Component<any, any> {
             chainId={chainId}
             killSession={this.resetApp}
             balance={this.state.balance}
+            contractTOKENBalance={this.state.contractTOKENBalance}
+            contractETHBalance={this.state.contractETHBalance}
+            isOwner={this.state.ownerAddress?.toLowerCase() === this.state.address.toLowerCase()}
           />
           <SContent>
             {fetching ? (
@@ -475,7 +487,7 @@ class App extends React.Component<any, any> {
                       Trump Seats: {this.state.trumpSeats}
                     </div> */}
                   </BooksWrapper>}
-                  <AddBookForm>
+                  {this.state.ownerAddress?.toLowerCase() === this.state.address.toLowerCase() && <AddBookForm>
                     <div>
                       <label>
                         Book Title:
@@ -489,7 +501,7 @@ class App extends React.Component<any, any> {
                       <input type="number" id='book-copies' name="book-copies" onChange={() => {this.handleChange(event)}}/>
                     </div>     
                     <Button onClick={() => this.addBook()} >Add Book</Button>
-                  </AddBookForm>
+                  </AddBookForm>}
                   <WrapTokenForm>
                   <div>
                       <label>
@@ -502,7 +514,11 @@ class App extends React.Component<any, any> {
                   {this.state.error && <SomethingWentWrong>
                     {this.state.error}
                   </SomethingWentWrong>}
-                  <Button onClick={() => this.unwrapToken()} >Unwrap Token</Button>
+                  {this.state.ownerAddress?.toLowerCase() === this.state.address.toLowerCase() && 
+                  <div>
+                    <Button disabled={this.state.contractTOKENBalance === '0'} onClick={() => this.unwrapToken()} >Unwrap Token</Button>
+                    <Button disabled={this.state.contractETHBalance === '0'} onClick={() => this.withdrawETH()} >Withdraw ALL Funds</Button>
+                  </div>}
                 </SLanding>
               )}
           </SContent>

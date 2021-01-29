@@ -77,12 +77,18 @@ interface IHeaderProps {
   connected: boolean
   address: string
   chainId: number
-  balance: any
+  balance: any,
+  contractETHBalance: any,
+  contractTOKENBalance: any,
+  isOwner: boolean
 }
 
 const Header = (props: IHeaderProps) => {
-  const { connected, address, chainId, killSession } = props
+  const { connected, address, chainId, killSession, isOwner } = props
   const balance = props.balance ? utils.formatEther(props.balance.toString()) : 0;
+  const contractETHBalance = props.contractETHBalance ? utils.formatEther(props.contractETHBalance.toString()) : 0;
+  const contractTOKENBalance = props.contractTOKENBalance ? utils.formatEther(props.contractTOKENBalance.toString()) : 0;
+
   const chainData = chainId ? getChainData(chainId) : null
   return (
     <SHeader {...props}>
@@ -90,7 +96,10 @@ const Header = (props: IHeaderProps) => {
         <SActiveChain>
           <p>{`Connected to`}</p>
           <p>{chainData.name}</p>
-          <p>{'LIB TOKEN BALANCE: '} {balance}</p>
+          <p>{'ACCOUNT LIB TOKEN BALANCE: '} {balance}</p>
+          {isOwner && <p>{'CONTRACT LIB TOKEN BALANCE: '} {contractTOKENBalance}</p>}
+          {isOwner && <p>{'CONTRACT ETH TOKEN BALANCE: '} {contractETHBalance}</p>}
+
         </SActiveChain>
       ) : 'Not Connected'}
       {address && (
